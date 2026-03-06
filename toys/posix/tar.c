@@ -104,6 +104,9 @@ struct tar_hdr {
 struct tar_dir_list {
   struct tar_dir_list *next;
   long long mtime;
+  uid_t uid;
+  gid_t gid;
+  mode_t mode;
   char name[];
 };
 
@@ -567,10 +570,11 @@ static int dirflush(char *name, int isdir)
     if (isdir) unlink(s);
   }
 
-  // Set deferred utimes() for directories this file isn't under.
-  // (Files must be depth-first ordered in tarball for this to matter.)
+  // Set deferred metadata for directories this file isn't under.
   while (TT.dirs) {
     struct tar_dir_list *td = TT.dirs;
+    char *dname = td->name;
+    int fd;
 
     // If next file is under (or equal to) this dir, keep waiting.
     // Compare archive-relative paths; require a real directory boundary to
@@ -585,7 +589,34 @@ static int dirflush(char *name, int isdir)
       if (len && td->name[len-1]=='/') break;  // name already ends at boundary
     }
 
-    wsettime(td->name, td->mtime);
+    // Apply deferred ownership, permissions, and timestamps.
+    // Setting these now ensures that files extracted inside the directory
+    // don't fail due to read-only directory permissions, and that directory
+    // mtimes are correct after all contents are written.
+    //
+    // We open the directory with O_NOFOLLOW and use file descriptor based
+    // syscalls (fchmod, fchown, futimens) because Linux lacks lchmod() and
+    // fchmodat(AT_SYMLINK_NOFOLLOW). This prevents a symlink race where an
+    // attacker replaces the directory with a symlink to a sensitive file
+    // after we've extracted its contents but before we've fixed its permissions.
+    //
+    // If the open fails with ELOOP, it means the path is currently a symlink.
+    // We intentionally ignore this because GNU tar skips metadata application
+    // when extracting a directory over an existing symlink. If it wasn't a
+    // pre-existing symlink but became one during extraction, it's a TOCTOU
+    // attack, and skipping it is also the safest action.
+    if ((fd = open(dname, O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC)) != -1) {
+      if (td->uid != (uid_t)-1)
+        if (fchown(fd, td->uid, td->gid))
+          perror_msg("chown %d:%d '%s'", (int)td->uid, (int)td->gid, dname);
+      if (fchmod(fd, td->mode)) perror_msg("chmod '%s'", dname);
+      if (td->mtime != -1) {
+        struct timespec times[2] = {{td->mtime, 0}, {td->mtime, 0}};
+        if (futimens(fd, times)) perror_msg("settime %lld %s", td->mtime, dname);
+      }
+      close(fd);
+    } else if (errno != ELOOP) perror_msg("open dir '%s'", dname);
+
     free(llist_pop(&TT.dirs));
   }
   free(s);
@@ -672,6 +703,22 @@ static void extract_to_disk(char *name)
   } else if (mknod(name, ala&~toys.old_umask, TT.hdr.device))
     return perror_msg("can't create '%s'", name);
 
+  struct tar_dir_list *td = 0;
+
+  if (S_ISDIR(ala)) {
+    // Writing files into a directory changes directory timestamps, so
+    // defer mtime updates until contents written. We also defer chown/chmod
+    // so read-only directories don't prevent file extraction.
+    td = xmalloc(sizeof(struct tar_dir_list)+strlen(name)+1);
+    td->mtime = FLAG(m) ? -1 : TT.hdr.mtime;
+    td->uid = td->gid = -1;
+    td->mode = FLAG(p) ? ala : ala&0777&~toys.old_umask;
+
+    strcpy(td->name, name);
+    td->next = TT.dirs;
+    TT.dirs = td;
+  }
+
   // Set ownership
   if (!FLAG(o) && !geteuid()) {
     int u = TT.hdr.uid, g = TT.hdr.gid;
@@ -688,25 +735,18 @@ static void extract_to_disk(char *name)
       if (gr) TT.hdr.gid = gr->gr_gid;
     }
 
-    if (lchown(name, u, g)) perror_msg("chown %d:%d '%s'", u, g, name);;
+    if (td) {
+      // TODO: u/g are captured before name->id resolution updates TT.hdr.uid/gid,
+      // so we store the archive's numeric ids rather than the resolved ones.
+      td->uid = u;
+      td->gid = g;
+    } else if (lchown(name, u, g)) perror_msg("chown %d:%d '%s'", u, g, name);;
   }
 
-  if (!S_ISLNK(ala)) chmod(name, FLAG(p) ? ala : ala&0777&~toys.old_umask);
+  if (!td && !S_ISLNK(ala)) chmod(name, FLAG(p) ? ala : ala&0777&~toys.old_umask);
 
   // Apply mtime.
-  if (!FLAG(m)) {
-    if (S_ISDIR(ala)) {
-      struct tar_dir_list *td;
-
-      // Writing files into a directory changes directory timestamps, so
-      // defer mtime updates until contents written.
-      td = xmalloc(sizeof(struct tar_dir_list)+strlen(name)+1);
-      td->mtime = TT.hdr.mtime;
-      strcpy(td->name, name);
-      td->next = TT.dirs;
-      TT.dirs = td;
-    } else wsettime(name, TT.hdr.mtime);
-  }
+  if (!td && !FLAG(m)) wsettime(name, TT.hdr.mtime);
 }
 
 static void unpack_tar(char *first)

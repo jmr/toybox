@@ -445,7 +445,6 @@ testing '-p overrides umask' \
 # tar must temporarily leave restrictive directories writable (0700) to extract
 # their contents, deferring the final chmod/chown until the directory is finished.
 # Matches POSIX pax and GNU tar.
-SKIP=2  # These tests require fixes to directory deferral to pass.
 testing 'extract read-only dir' \
   'umask 0022 && rm -rf rodir && mkdir -p rodir/dir && echo hello > rodir/dir/file && \
    chmod 555 rodir/dir && tar cf rodir.tar rodir && chmod 755 rodir/dir && rm -rf rodir && \
