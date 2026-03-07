@@ -68,7 +68,7 @@ GLOBALS(
   struct arg_list *exclude;
 
   struct double_list *incl, *excl, *seen;
-  struct string_list *dirs;
+  struct tar_dir_list *dirs;
   char *cwd, **xfsed;
   int fd, ouid, ggid, hlc, warn, sparselen, pid, xfpipe[2];
   struct dev_ino archive_di;
@@ -98,6 +98,13 @@ struct tar_hdr {
   char name[100], mode[8], uid[8], gid[8], size[12], mtime[12], chksum[8],
        type, link[100], magic[8], uname[32], gname[32], major[8], minor[8],
        prefix[155], padd[12];
+};
+
+// Deferred directory metadata for dirflush()
+struct tar_dir_list {
+  struct tar_dir_list *next;
+  long long mtime;
+  char name[];
 };
 
 // Tar uses ASCII octal when it fits, base-256 otherwise.
@@ -563,11 +570,12 @@ static int dirflush(char *name, int isdir)
   // Set deferred utimes() for directories this file isn't under.
   // (Files must be depth-first ordered in tarball for this to matter.)
   while (TT.dirs) {
+    struct tar_dir_list *td = TT.dirs;
 
     // If next file is under (or equal to) this dir, keep waiting
     if (name && strstart(&ss, ss = s) && (!*ss || *ss=='/')) break;
 
-    wsettime(TT.dirs->str+sizeof(long long), *(long long *)TT.dirs->str);
+    wsettime(td->name, td->mtime);
     free(llist_pop(&TT.dirs));
   }
   free(s);
@@ -678,16 +686,15 @@ static void extract_to_disk(char *name)
   // Apply mtime.
   if (!FLAG(m)) {
     if (S_ISDIR(ala)) {
-      struct string_list *sl;
+      struct tar_dir_list *td;
 
       // Writing files into a directory changes directory timestamps, so
       // defer mtime updates until contents written.
-
-      sl = xmalloc(sizeof(struct string_list)+sizeof(long long)+strlen(name)+1);
-      *(long long *)sl->str = TT.hdr.mtime;
-      strcpy(sl->str+sizeof(long long), name);
-      sl->next = TT.dirs;
-      TT.dirs = sl;
+      td = xmalloc(sizeof(struct tar_dir_list)+strlen(name)+1);
+      td->mtime = TT.hdr.mtime;
+      strcpy(td->name, name);
+      td->next = TT.dirs;
+      TT.dirs = td;
     } else wsettime(name, TT.hdr.mtime);
   }
 }
