@@ -442,6 +442,53 @@ testing '-p overrides umask' \
   'umask 0022 && rm -rf dir && mkdir dir && tar xpf $FILES/tar/dir.tar && stat -c%A dir dir/file' \
   'drwxrwxrwx\n-rwxrwxrwx\n' '' ''
 
+# tar must temporarily leave restrictive directories writable (0700) to extract
+# their contents, deferring the final chmod/chown until the directory is finished.
+# Matches POSIX pax and GNU tar.
+SKIP=2  # These tests require fixes to directory deferral to pass.
+testing 'extract read-only dir' \
+  'umask 0022 && rm -rf rodir && mkdir -p rodir/dir && echo hello > rodir/dir/file && \
+   chmod 555 rodir/dir && tar cf rodir.tar rodir && chmod 755 rodir/dir && rm -rf rodir && \
+   tar xf rodir.tar && stat -c "%A" rodir/dir && cat rodir/dir/file; \
+   chmod 755 rodir/dir' \
+  'dr-xr-xr-x\nhello\n' '' ''
+
+# GNU tar skips applying directory permissions if the extraction path is an
+# existing symlink. This prevents a TOCTOU race where an attacker replaces a
+# directory with a symlink to hijack the chmod (CWE-59).
+# https://cwe.mitre.org/data/definitions/59.html
+testing 'extract dir over symlink' \
+  'umask 0022 && rm -rf orig dest && mkdir -p orig/dir && touch orig/dir/file && \
+   chmod 700 orig/dir && tar cf test.tar -C orig dir && \
+   mkdir dest && mkdir dest/realdir && chmod 755 dest/realdir && ln -s realdir dest/dir && \
+   tar xf test.tar -C dest && stat -c "%A %n" dest/realdir; \
+   chmod -R 755 dest orig 2>/dev/null' \
+  'drwxr-xr-x dest/realdir\n' '' ''
+
+# Toybox uses a depth-first search (DFS) assumption to defer finalizing
+# directory metadata. If an archive is severely out-of-order, a read-only
+# directory might be finalized early, preventing subsequent files from being
+# extracted into it.  This strictly matches GNU tar's behavior.
+# NOTE: Currently, directory permissions are applied immediately upon creation,
+# so the extraction fails (and the test passes) regardless of the DFS logic.
+# Once directory chmod is properly deferred to dirflush(), the out-of-order
+# file will trigger early finalization, and the extraction will still fail.
+# NOTE: We must use the host's /bin/tar to build the out-of-order fixture
+# because toybox tar does not currently support the append (-r) flag.
+# Skip for root because root bypasses directory permissions, so the
+# extraction that's expected to fail would instead succeed.
+skipnot [ $(id -u) -ne 0 ]
+testing 'extract read-only dir out of order' \
+  'umask 0022 && rm -rf orig dest && mkdir -p orig/dir orig/dir2 && touch orig/dir2/file2 && \
+   chmod 555 orig/dir && /bin/tar -cf out.tar orig/dir && chmod 755 orig/dir && \
+   echo hello > orig/dir/file && \
+   /bin/tar -rf out.tar orig/dir2/file2 && /bin/tar -rf out.tar orig/dir/file && \
+   chmod -R 755 dest 2>/dev/null; rm -rf dest && mkdir dest && \
+   tar xf out.tar -C dest 2>/dev/null || echo "extract failed" ; \
+   [ ! -f dest/orig/dir/file ] && echo "file not created" ; \
+   chmod -R 755 dest orig 2>/dev/null' \
+  'extract failed\nfile not created\n' '' ''
+
 if false
 then
 # Sequencing issues that leak implementation details out the interface
