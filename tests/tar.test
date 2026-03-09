@@ -469,10 +469,7 @@ testing 'extract dir over symlink' \
 # directory metadata. If an archive is severely out-of-order, a read-only
 # directory might be finalized early, preventing subsequent files from being
 # extracted into it.  This strictly matches GNU tar's behavior.
-# NOTE: Currently, directory permissions are applied immediately upon creation,
-# so the extraction fails (and the test passes) regardless of the DFS logic.
-# Once directory chmod is properly deferred to dirflush(), the out-of-order
-# file will trigger early finalization, and the extraction will still fail.
+# The out-of-order file triggers early finalization, and the extraction fails.
 # NOTE: We must use the host's /bin/tar to build the out-of-order fixture
 # because toybox tar does not currently support the append (-r) flag.
 # Skip for root because root bypasses directory permissions, so the

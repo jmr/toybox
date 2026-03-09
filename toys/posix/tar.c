@@ -572,8 +572,18 @@ static int dirflush(char *name, int isdir)
   while (TT.dirs) {
     struct tar_dir_list *td = TT.dirs;
 
-    // If next file is under (or equal to) this dir, keep waiting
-    if (name && strstart(&ss, ss = s) && (!*ss || *ss=='/')) break;
+    // If next file is under (or equal to) this dir, keep waiting.
+    // Compare archive-relative paths; require a real directory boundary to
+    // avoid false prefix matches (e.g. "dir10/" vs "dir1/").
+    // POSIX archives end directory names with '/', so the third check is
+    // the common case; the first two handle exact matches and slash-free names.
+    ss = name;
+    if (name && strstart(&ss, td->name)) {
+      int len = strlen(td->name);
+
+      if (!*ss || *ss=='/') break;        // exact match or boundary after name
+      if (len && td->name[len-1]=='/') break;  // name already ends at boundary
+    }
 
     wsettime(td->name, td->mtime);
     free(llist_pop(&TT.dirs));
