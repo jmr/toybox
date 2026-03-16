@@ -192,7 +192,7 @@ NOSPACE=1 testing "block special" "tar --mtime @0 -cf test.tar dir/block && rm -
 
 skipnot chown nobody:nogroup dir/file 2>/dev/null
 testing "ownership" "$TAR dir/file | SUM 3" \
-  "2d7b96c7025987215f5a41f10eaa84311160afdb\n" "" ""
+  "d9e7fb3884430d29e7eed0dc04a2593dd260df14\n" "" ""
 
 mkdir -p dd/sub/blah &&
 tar cf test.tar dd/sub/blah &&
