@@ -527,15 +527,13 @@ tar cpf tar.tgz dir/file
 fi
 
 # uid/gid resolution: archive uname should be resolved to local uid, not the
-# numeric uid stored in the archive. Currently buggy: lchown uses the raw
-# archive uid captured before name->id resolution. Expected value will change
-# to '0\n' when the bug is fixed.
+# numeric uid stored in the archive.
 skipnot [ $(id -u) -eq 0 ]
 touch owntest
 tar c --owner root:99999 --group root:0 --mtime @0 owntest > own.tar
 rm owntest
-testing 'uid from archive name resolution (buggy: uses numeric id)' \
-  'tar xf own.tar && stat -c %u owntest' '99999\n' '' ''
+testing 'uid resolved from archive name not numeric id' \
+  'tar xf own.tar && stat -c %u owntest' '0\n' '' ''
 rm -f own.tar owntest
 
 rm -f save.dat

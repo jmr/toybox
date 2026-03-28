@@ -721,8 +721,6 @@ static void extract_to_disk(char *name)
 
   // Set ownership
   if (!FLAG(o) && !geteuid()) {
-    int u = TT.hdr.uid, g = TT.hdr.gid;
-
     if (TT.owner) TT.hdr.uid = TT.ouid;
     else if (!FLAG(numeric_owner) && *TT.hdr.uname) {
       struct passwd *pw = bufgetpwnamuid(TT.hdr.uname, 0);
@@ -736,11 +734,10 @@ static void extract_to_disk(char *name)
     }
 
     if (td) {
-      // TODO: u/g are captured before name->id resolution updates TT.hdr.uid/gid,
-      // so we store the archive's numeric ids rather than the resolved ones.
-      td->uid = u;
-      td->gid = g;
-    } else if (lchown(name, u, g)) perror_msg("chown %d:%d '%s'", u, g, name);;
+      td->uid = TT.hdr.uid;
+      td->gid = TT.hdr.gid;
+    } else if (lchown(name, TT.hdr.uid, TT.hdr.gid))
+      perror_msg("chown %d:%d '%s'", TT.hdr.uid, TT.hdr.gid, name);
   }
 
   if (!td && !S_ISLNK(ala)) chmod(name, FLAG(p) ? ala : ala&0777&~toys.old_umask);
