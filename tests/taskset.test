@@ -28,10 +28,8 @@ testcmd 'run on first' '1 ps -o psr= $BASHPID | xargs' '0\n' '' ''
 testcmd 'run on last' '$LAST ps -o psr= $BASHPID | xargs' "$((CPUS-1))\n" '' ''
 
 # mask -> CPU list
-if [ $CPUS -gt 1 ]; then
-  testcmd 'print all as CPU list' \
-    '$MASK taskset -pc 0 | sed "s/.*: //"' "0-$((CPUS-1))\n" '' ''
-fi
+testcmd 'print all as CPU list' \
+  '$MASK taskset -pc 0 | sed "s/.*: //"' "0-$((CPUS-1))\n" '' ''
 testcmd 'print first as CPU list' \
   '1 taskset -pc 0 | sed "s/.*: //"' '0\n' '' ''
 testcmd 'print last as CPU list' \
@@ -48,9 +46,16 @@ testcmd 'set CPU list to last' \
   '-c $((CPUS-1)) taskset -p 0 | sed "s/.*: //"' "$LAST\n" '' ''
 
 # CPU list -> CPU list
+testcmd 'two-CPU list is comma-separated (stride 1)' \
+  '-c 0,1 taskset -pc 0 | sed "s/.*: //"' '0,1\n' '' ''
 if [ $CPUS -gt 2 ]; then
+  testcmd 'two-CPU list is comma-separated (stride 2)' \
+    '-c 0,2 taskset -pc 0 | sed "s/.*: //"' '0,2\n' '' ''
+fi
+if [ $CPUS -gt 4 ]; then
+  # A list needs to have three CPUs to print as a range.
   testcmd 'even CPU list' \
-    '-c $(seq -s, 0 2 $CPUS) taskset -pc 0 | sed "s/.*: //"' \
+    '-c $(seq -s, 0 2 $((CPUS-1))) taskset -pc 0 | sed "s/.*: //"' \
     "0-$((($CPUS-1)&~1)):2\n" '' ''
 fi
 if [ $CPUS -gt 5 ]; then
